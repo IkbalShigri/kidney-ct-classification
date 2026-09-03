@@ -123,5 +123,5 @@ Any future extension of this work toward real-world use would require: clinical-
 
 ## Author
 
-*[Your name]* — *[program/university]*
+*Muhammad Iqbal* — *Hazara University*
 Built as an independent project exploring applied deep learning for medical image classification.
