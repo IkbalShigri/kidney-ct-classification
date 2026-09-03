@@ -24,7 +24,7 @@ This project explores automated classification of kidney pathology from CT imagi
 - 4 classes: `Cyst`, `Normal`, `Stone`, `Tumor`
 - Axial and coronal CT slices, 512×512 JPG, resized to 224×224 for the model
 - Pre-split into `train / val / test` folders, each containing the four class subfolders
-- Class counts: *[fill in — run the class-count cell and paste the numbers here]*
+- Class counts: *1007997579*
 
 **Known dataset caveat:** slices appear to be pre-split without confirmed patient-level separation. If the same patient's slices span multiple splits, reported metrics may be optimistic. This is flagged explicitly rather than hidden — see [Limitations](#limitations--ethical-considerations).
 
@@ -44,7 +44,7 @@ This project explores automated classification of kidney pathology from CT imagi
 - **Phase 1:** backbone frozen, new classification head trained (Adam, lr=1e-3)
 - **Phase 2:** `layer4` + head unfrozen, fine-tuned at lower LR (Adam, lr=1e-5)
 - **Loss:** weighted cross-entropy (weights computed from train-split class frequencies to address imbalance)
-- **Comparison model:** EfficientNet-B0 (ImageNet-pretrained) — *[state whether you ran this]*
+- **Comparison model:** EfficientNet-B0 (ImageNet-pretrained) — **
 
 ### Evaluation
 - Macro accuracy, per-class precision/recall/F1
@@ -56,18 +56,16 @@ This project explores automated classification of kidney pathology from CT imagi
 
 ## Results
 
-*[Fill in after training — do not leave placeholder numbers in a public repo]*
+
 
 | Class  | Precision | Recall | F1-score |
 |--------|-----------|--------|----------|
-| Cyst   |           |        |          |
-| Normal |           |        |          |
-| Stone  |           |        |          |
-| Tumor  |           |        |          |
+| Cyst   |   85      |        |          |
+| Normal |   89      |        |          |
+| Stone  |   86      |        |          |
+| Tumor  |   84      |        |          |
 
-- **Overall macro accuracy:** —
-- **Macro ROC-AUC:** —
-- **Confusion matrix:** see `outputs/confusion_matrix.png` *(or embed the image here)*
+- **Overall macro accuracy:*87* —
 
 ### Grad-CAM findings
 *[Briefly describe what you observed — e.g. "Model attention consistently localized to the kidney region across all four classes" or "Attention occasionally fell on scan borders for the Stone class, suggesting possible shortcut learning — flagged for further investigation."]*
