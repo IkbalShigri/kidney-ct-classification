@@ -1,125 +1,206 @@
-# Kidney CT Multi-Class Classification (PyTorch)
+# Kidney CT Image Classification with ResNet50 and Grad-CAM
 
-A deep learning pipeline for classifying kidney CT scan slices into four categories — **Cyst, Normal, Stone, Tumor** — using transfer learning, with an emphasis on rigorous evaluation and interpretability rather than raw accuracy alone.
+A PyTorch transfer-learning project for classifying kidney CT images into four categories: **Cyst, Normal, Stone, and Tumor**. The notebook includes a two-phase ResNet50 training pipeline, test-set evaluation, a confusion matrix, and Grad-CAM visualizations.
 
-> **Status:** Research prototype / academic project. **Not a diagnostic tool.** Not clinically validated. See [Limitations](#limitations--ethical-considerations) before drawing any conclusions from this work.
+> **Research / educational prototype only. Not a medical device or diagnostic tool.** The model has not been clinically validated and must not be used to make medical decisions.
 
----
+## Project overview
 
-## Overview
+This project treats kidney CT image classification as a four-class image-recognition task. It uses an ImageNet-pretrained ResNet50 backbone and a custom classification head. Training is performed in two phases: first the backbone is frozen while the classifier head is trained, then `layer4` and the classifier are fine-tuned.
 
-This project explores automated classification of kidney pathology from CT imaging as a computer vision problem, with particular attention to failure modes that are common — and often under-reported — in medical imaging ML projects: data leakage, class imbalance, and models learning spurious shortcuts instead of anatomically meaningful features.
-
-**Key design decisions:**
-- Transfer learning (ResNet50, ImageNet-pretrained) rather than training from scratch, given limited data
-- Two-phase training: frozen backbone → partial fine-tuning
-- Per-class evaluation (precision/recall/F1/AUC), not just overall accuracy — false negatives on Tumor are far more consequential than on Cyst
-- Grad-CAM visualization to check *why* the model predicts what it predicts, not just *whether* it's right
-- Explicit documentation of what wasn't verified (e.g. patient-level leakage), rather than silently reporting an inflated number
-
----
+The notebook also reports per-class metrics and provides visual checks of the training examples, learning curves, test confusion matrix, and Grad-CAM explanations.
 
 ## Dataset
 
-- 4 classes: `Cyst`, `Normal`, `Stone`, `Tumor`
-- Axial and coronal CT slices, 512×512 JPG, resized to 224×224 for the model
-- Pre-split into `train / val / test` folders, each containing the four class subfolders
-- Class counts: *1007997579*
+The notebook expects the following folder structure, which it automatically searches for under Kaggle's `/kaggle/input` directory:
 
-**Known dataset caveat:** slices appear to be pre-split without confirmed patient-level separation. If the same patient's slices span multiple splits, reported metrics may be optimistic. This is flagged explicitly rather than hidden — see [Limitations](#limitations--ethical-considerations).
+```text
+Split_Images/
+├── train/
+│   ├── Cyst/
+│   ├── Normal/
+│   ├── Stone/
+│   └── Tumor/
+├── val/
+│   ├── Cyst/
+│   ├── Normal/
+│   ├── Stone/
+│   └── Tumor/
+└── test/
+    ├── Cyst/
+    ├── Normal/
+    ├── Stone/
+    └── Tumor/
+```
 
----
+Dataset used in the recorded notebook run: [Kidney Stone Datasets on Kaggle](https://www.kaggle.com/datasets/iamiqbalshigri/kidney-stone-datasets).
+
+### Class distribution
+
+The counts below are printed by the notebook from the loaded `ImageFolder` datasets.
+
+| Split | Cyst | Normal | Stone | Tumor | Total |
+|---|---:|---:|---:|---:|---:|
+| Train | 2,596 | 3,553 | 963 | 1,598 | **8,710** |
+| Validation | 741 | 1,015 | 275 | 456 | **2,487** |
+| Test | 371 | 509 | 139 | 229 | **1,248** |
+| **Total** | **3,708** | **5,077** | **1,377** | **2,283** | **12,445** |
+
+The dataset is imbalanced, so the notebook computes inverse-frequency class weights from the training split and uses weighted cross-entropy loss. The table describes image counts, not patient counts.
 
 ## Method
 
-### Preprocessing
-- Resize to 224×224
-- Grayscale → 3-channel (to match ImageNet-pretrained weight expectations)
-- Normalization using ImageNet mean/std
-- Augmentation (train only): mild rotation (±10°), random resized crop, brightness/contrast jitter
-- No horizontal flip (not confirmed anatomically safe given mixed axial/coronal views in the data)
+### Preprocessing and augmentation
 
-### Model
-- **Backbone:** ResNet50 (ImageNet-pretrained)
-- **Phase 1:** backbone frozen, new classification head trained (Adam, lr=1e-3)
-- **Phase 2:** `layer4` + head unfrozen, fine-tuned at lower LR (Adam, lr=1e-5)
-- **Loss:** weighted cross-entropy (weights computed from train-split class frequencies to address imbalance)
-- **Comparison model:** EfficientNet-B0 (ImageNet-pretrained) — **
+- Convert each CT image to three-channel grayscale to match the pretrained ResNet50 input.
+- Resize images to `224 × 224` pixels.
+- Normalize using ImageNet mean and standard deviation.
+- Apply training-only augmentation: random rotation up to ±7° and brightness/contrast jitter (`0.08`).
+- Do not apply horizontal flipping.
+- Apply only grayscale conversion, resizing, tensor conversion, and normalization to validation and test images.
 
-### Evaluation
-- Macro accuracy, per-class precision/recall/F1
-- Macro ROC-AUC (one-vs-rest)
-- Confusion matrix
-- Grad-CAM on `layer4[-1]` for qualitative inspection of model attention
+### Model and training configuration
 
----
+| Setting | Notebook configuration |
+|---|---|
+| Backbone | ResNet50, ImageNet `IMAGENET1K_V2` weights |
+| Classification head | Dropout (`p=0.35`) + linear layer (2,048 → 4) |
+| Input size | 224 × 224 |
+| Batch size | 32 |
+| Optimizer | AdamW |
+| Phase 1 learning rate | `1e-3` (classifier head; backbone frozen) |
+| Phase 2 learning rate | `1e-5` (`layer4` and classifier unfrozen) |
+| Weight decay | `1e-4` |
+| Loss | Weighted cross-entropy |
+| Learning-rate scheduler | ReduceLROnPlateau (factor `0.5`, patience `2`) |
+| Early-stopping patience | 3 epochs based on validation macro-F1 |
+| Maximum epochs | 6 head-training + 6 fine-tuning |
+| Random seed | 42 |
+| Mixed precision | Enabled when CUDA is available |
 
-## Results
+## Training sample images
 
+The following eight images are the training batch visualization saved in the notebook output. They are example images, not a complete representation of the dataset.
 
+![Training sample images](assets/training-samples.png)
 
-| Class  | Precision | Recall | F1-score |
-|--------|-----------|--------|----------|
-| Cyst   |   85      |        |          |
-| Normal |   89      |        |          |
-| Stone  |   86      |        |          |
-| Tumor  |   84      |        |          |
+## Training and validation curves
 
-- **Overall macro accuracy:*87* —
+The plots show loss and macro-F1 across the 12 recorded epochs. The dashed vertical line marks the transition after six frozen-backbone epochs; fine-tuning starts at epoch 7.
 
-### Grad-CAM findings
-*[Briefly describe what you observed — e.g. "Model attention consistently localized to the kidney region across all four classes" or "Attention occasionally fell on scan borders for the Stone class, suggesting possible shortcut learning — flagged for further investigation."]*
+![Training and validation curves](assets/training-validation-curves.png)
 
-This qualitative check matters more than it might seem: a model attending to the correct anatomy is meaningfully more trustworthy than one with a high score and no attention-map inspection.
+## Test-set results
 
----
+The notebook's recorded test-set evaluation contains **1,248 images**.
 
-## Repository Structure
+| Metric | Test result |
+|---|---:|
+| Accuracy | **0.9968 (99.68%)** |
+| Macro precision | 0.9977 |
+| Macro recall | 0.9946 |
+| Macro-F1 | **0.9961 (99.61%)** |
+| Macro ROC-AUC (one-vs-rest) | **1.0000** |
 
-```
-├── kidney_classification_pytorch.ipynb   # Full training + evaluation notebook (Colab-ready)
+### Per-class classification report
+
+| Class | Precision | Recall | F1-score | Support |
+|---|---:|---:|---:|---:|
+| Cyst | 0.9946 | 0.9973 | 0.9960 | 371 |
+| Normal | 0.9961 | 1.0000 | 0.9980 | 509 |
+| Stone | 1.0000 | 0.9856 | 0.9928 | 139 |
+| Tumor | 1.0000 | 0.9956 | 0.9978 | 229 |
+| **Macro average** | **0.9977** | **0.9946** | **0.9961** | **1,248** |
+
+These are the results recorded in the uploaded notebook. They are not evidence of clinical performance or external generalization.
+
+## Confusion matrix
+
+The confusion matrix is calculated on the held-out test split. Rows represent true labels and columns represent predicted labels.
+
+![Test-set confusion matrix](assets/confusion-matrix.png)
+
+| True label / Predicted label | Cyst | Normal | Stone | Tumor |
+|---|---:|---:|---:|---:|
+| Cyst | 370 | 1 | 0 | 0 |
+| Normal | 0 | 509 | 0 | 0 |
+| Stone | 1 | 1 | 137 | 0 |
+| Tumor | 1 | 0 | 0 | 228 |
+
+## Grad-CAM visualizations
+
+Grad-CAM is computed from the final convolutional block (`model.layer4[-1]`) of ResNet50. The four examples below are the four test images selected by the notebook during its recorded run. The titles show the true and predicted classes; all four displayed examples were classified correctly.
+
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Example 1 — True: Cyst | Predicted: Cyst</strong><br><img src="assets/gradcam-example-1.png" alt="Grad-CAM example 1: true Cyst, predicted Cyst" width="100%"></td>
+    <td align="center" width="50%"><strong>Example 2 — True: Cyst | Predicted: Cyst</strong><br><img src="assets/gradcam-example-2.png" alt="Grad-CAM example 2: true Cyst, predicted Cyst" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>Example 3 — True: Normal | Predicted: Normal</strong><br><img src="assets/gradcam-example-3.png" alt="Grad-CAM example 3: true Normal, predicted Normal" width="100%"></td>
+    <td align="center" width="50%"><strong>Example 4 — True: Normal | Predicted: Normal</strong><br><img src="assets/gradcam-example-4.png" alt="Grad-CAM example 4: true Normal, predicted Normal" width="100%"></td>
+  </tr>
+</table>
+
+The heatmaps are qualitative illustrations. They show where the model's gradients emphasize image features for a prediction; they do **not** prove that the model is using clinically valid anatomy or that the prediction is correct. Some activation is also visible outside the immediate kidney regions, so the maps should be interpreted cautiously.
+
+## How to run the notebook
+
+This notebook is configured for **Kaggle Notebooks**.
+
+1. Open `kidney_classification_pytorch.ipynb` in Kaggle.
+2. Add the [Kidney Stone Datasets](https://www.kaggle.com/datasets/iamiqbalshigri/kidney-stone-datasets) dataset as notebook input.
+3. In notebook settings, select a GPU accelerator. The recorded run used a Tesla T4 GPU.
+4. Run the notebook cells from top to bottom. The notebook searches `/kaggle/input` for `Split_Images` and its `train`, `val`, and `test` folders.
+5. The trained model and evaluation files are written to `/kaggle/working`.
+
+### Main output files
+
+- `kidney_resnet50_classifier.pth` — final model checkpoint.
+- `training_history.csv` — training and validation metrics per epoch.
+- `test_class_metrics.csv` — per-class precision, recall, F1, and support.
+- `test_confusion_matrix.png` — test confusion matrix.
+- `kidney_project_outputs.zip` — package of the model checkpoint and principal evaluation outputs.
+
+The notebook includes an output-packaging cell that archives only the selected artifacts, avoiding the recursive self-inclusion problem from the earlier version.
+
+## Repository structure
+
+```text
+kidney-ct-classification/
 ├── README.md
-└── outputs/                              # (optional) saved plots, confusion matrix, sample Grad-CAMs
+├── kidney_classification_pytorch.ipynb
+└── assets/
+    ├── training-samples.png
+    ├── training-validation-curves.png
+    ├── confusion-matrix.png
+    ├── gradcam-example-1.png
+    ├── gradcam-example-2.png
+    ├── gradcam-example-3.png
+    └── gradcam-example-4.png
 ```
 
----
+## Limitations and ethical considerations
 
-## How to Run
+- **Not for diagnosis:** This is an academic/educational prototype, not a medical device. It must not guide diagnosis, treatment, or patient care.
+- **Patient-level separation is unverified:** The notebook reads pre-existing train/validation/test folders. It does not inspect patient identifiers or establish that slices from the same patient are confined to a single split. Potential patient-level leakage therefore cannot be ruled out.
+- **No external validation:** The reported metrics come from this dataset's test split only. Performance on data from other hospitals, scanners, acquisition protocols, or populations is unknown.
+- **2D image classification:** The model processes individual 2D images and does not use full 3D CT volumes or broader clinical context.
+- **Class imbalance remains relevant:** Weighted loss helps account for unequal class counts but does not eliminate possible class-specific bias.
+- **Grad-CAM is not proof of explainability:** Attention maps are qualitative diagnostics, not evidence that the model learned medically meaningful features.
+- **No radiologist validation:** The notebook does not document a radiologist-led review of labels, predictions, or heatmaps.
 
-1. Upload the dataset to Google Drive, preserving the `train/val/test → Cyst/Normal/Stone/Tumor` structure.
-2. Open `kidney_classification_pytorch.ipynb` in Google Colab.
-3. Set runtime to GPU (Runtime → Change runtime type → T4 GPU).
-4. Update `DATA_ROOT` in the config cell to your Drive path.
-5. Run all cells in order.
+Any future clinical investigation would require verified patient-level splits, independent external validation, expert-reviewed annotations, subgroup analysis, and prospective clinical evaluation.
 
-Trained model weights are saved to Drive as `resnet50_kidney_classifier.pt`.
+## Future work
 
----
-
-## Limitations & Ethical Considerations
-
-- **Not a diagnostic tool.** This is a research/educational computer vision system. It has not been evaluated against clinical ground truth by qualified radiologists, nor validated on an external dataset.
-- **Possible data leakage.** If dataset slices are patient-derived and patient IDs were not used to enforce the train/val/test split, the same patient's anatomy could appear across splits, inflating reported performance. This has not been independently confirmed for this dataset.
-- **No external validation.** Results reflect this dataset's distribution only (single source, unknown scanner/protocol variation) and may not generalize to CT scans from other institutions or populations.
-- **Slice-level, not volumetric.** The model classifies individual 2D slices; it does not use full 3D CT context, which a clinical system realistically would need.
-- **Class imbalance mitigation (class weighting) reduces but does not eliminate** the risk of biased performance across classes — per-class metrics should always be read alongside the overall accuracy, not instead of it.
-- **Grad-CAM is a sanity check, not proof of correctness.** Reasonable-looking attention maps do not guarantee the model has learned clinically meaningful or generalizable features.
-
-Any future extension of this work toward real-world use would require: clinical-grade labeled data with verified patient-level provenance, external validation on independent datasets, radiologist-reviewed ground truth, and prospective evaluation — none of which are in scope here.
-
----
-
-## Future Work
-
-- Patient-level split verification (or re-split if metadata is available)
-- K-fold cross-validation with mean ± std reporting across seeds
-- Full EfficientNet-B0 / DenseNet121 comparison table
-- 3D/volumetric modeling using full CT series rather than isolated slices
-- External dataset validation
-
----
+- Verify patient-level provenance and rebuild the split if required.
+- Perform repeated runs or cross-validation and report variation across seeds.
+- Evaluate on an independent external dataset.
+- Add radiologist review of false predictions and Grad-CAM maps.
+- Investigate volumetric or multi-slice models that use 3D CT context.
 
 ## Author
 
-*Muhammad Iqbal* — *Hazara University*
-Built as an independent project exploring applied deep learning for medical image classification.
+**Muhammad Iqbal** — Hazara University  
+Independent project exploring PyTorch, transfer learning, and medical-image classification.
